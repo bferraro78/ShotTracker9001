@@ -36,12 +36,14 @@ Copyright (c) 2012 Jeff Rowberg
     #include "Wire.h"
 #endif
 
+#include "ShotTrackerInterface.h";
+
+
+
+
 // class default I2C address is 0x68
-// specific I2C addresses may be passed as a parameter here
-// AD0 low = 0x68 (default for SparkFun breakout and InvenSense evaluation board)
-// AD0 high = 0x69
 MPU6050 mpu;
-//MPU6050 mpu(0x69); // <-- use for AD0 high
+
 
 /* =========================================================================
    NOTE: In addition to connection 3.3v, GND, SDA, and SCL, this sketch
@@ -63,7 +65,7 @@ MPU6050 mpu;
 
 
 
-
+/* ANGLES */ 
 // uncomment "OUTPUT_READABLE_EULER" if you want to see Euler angles
 // (in degrees) calculated from the quaternions coming from the FIFO.
 // Note that Euler angles suffer from gimbal lock (for more info, see
@@ -77,6 +79,20 @@ MPU6050 mpu;
 // more info, see: http://en.wikipedia.org/wiki/Gimbal_lock)
 #define OUTPUT_READABLE_YAWPITCHROLL
 
+
+/* ACCELLERATORS */
+// uncomment "OUTPUT_READABLE_REALACCEL" if you want to see acceleration
+// components with gravity removed. This acceleration reference frame is
+// not compensated for orientation, so +X is always +X according to the
+// sensor, just without the effects of gravity. If you want acceleration
+// compensated for orientation, us OUTPUT_READABLE_WORLDACCEL instead.
+//#define OUTPUT_READABLE_REALACCEL
+
+// uncomment "OUTPUT_READABLE_WORLDACCEL" if you want to see acceleration
+// components with gravity removed and adjusted for the world frame of
+// reference (yaw is relative to initial orientation, since no magnetometer
+// is present in this case). Could be quite handy in some cases.
+//#define OUTPUT_READABLE_WORLDACCEL
 
 
 
@@ -247,39 +263,102 @@ void loop() {
         // (this lets us immediately read more without waiting for an interrupt)
         fifoCount -= packetSize;
 
+        /* PRINT ANGELS*/
+        printAngels();
+        /* PRINT ACCELERATORS */
+        printAccelerators();
 
 
+        /* Logic for arm movements */
+        determineAngelOfArmInRange();
+
+
+
+        activateLEDBlinker();
         
-        #ifdef OUTPUT_READABLE_YAWPITCHROLL
-            // display Euler angles in degrees
-            mpu.dmpGetQuaternion(&q, fifoBuffer);
-            mpu.dmpGetGravity(&gravity, &q);
-            mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
-            Serial.print("ypr\t");
-            Serial.print(ypr[0] * 180/M_PI);
-            Serial.print("\t");
-            Serial.print(ypr[1] * 180/M_PI);
-            Serial.print("\t");
-            Serial.println(ypr[2] * 180/M_PI);
-        #endif
-                if((ypr[2] * 180/M_PI)>15) {  digitalWrite(BUZZER_PIN, HIGH);  delay(100);   digitalWrite(BUZZER_PIN, LOW);}
-
-
-        #ifdef OUTPUT_READABLE_EULER
-            // display Euler angles in degrees
-            mpu.dmpGetQuaternion(&q, fifoBuffer);
-            mpu.dmpGetEuler(euler, &q);
-            Serial.print("euler\t");
-            Serial.print(euler[0] * 180/M_PI);
-            Serial.print("\t");
-            Serial.print(euler[1] * 180/M_PI);
-            Serial.print("\t");
-            Serial.println(euler[2] * 180/M_PI);  
-        #endif
-
-
-        // blink LED to indicate activity
-        blinkState = !blinkState;
-        digitalWrite(LED_PIN, blinkState);
     }
+}
+
+/* TODO: 1. Determine where to ut chip on  arm/wrist.
+         2. Determine which calcualtion we use for forward/back and side to side]
+
+         I think if we put vchip flat on top or bottom of wrist...
+         Pitch number will be used for forward and back
+         Yaw will be from side to side
+
+         ^^ MUST TEST
+*/
+
+void determineAngelOfArmInRange() {
+  // Foward and back 
+  if((ypr[2] * 180/M_PI)>15) {  digitalWrite(BUZZER_PIN, HIGH);  delay(100);   digitalWrite(BUZZER_PIN, LOW);}
+}
+
+
+void printAngels() {
+
+    // Yaw pitch roll
+    #ifdef OUTPUT_READABLE_YAWPITCHROLL
+      // display Euler angles in degrees
+      mpu.dmpGetQuaternion(&q, fifoBuffer);
+      mpu.dmpGetGravity(&gravity, &q);
+      mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
+      Serial.print("ypr\t");
+      Serial.print(ypr[0] * 180/M_PI); // yaw
+      Serial.print("\t");
+      Serial.print(ypr[1] * 180/M_PI); // pitch
+      Serial.print("\t");
+      Serial.println(ypr[2] * 180/M_PI); // roll
+  #endif
+
+
+  // Euler Angels
+  #ifdef OUTPUT_READABLE_EULER
+      mpu.dmpGetQuaternion(&q, fifoBuffer);
+      mpu.dmpGetEuler(euler, &q);
+      Serial.print("euler\t");
+      Serial.print(euler[0] * 180/M_PI);
+      Serial.print("\t");
+      Serial.print(euler[1] * 180/M_PI);
+      Serial.print("\t");
+      Serial.println(euler[2] * 180/M_PI);  
+  #endif
+}
+
+void printAccelerators() {
+    #ifdef OUTPUT_READABLE_REALACCEL
+        // display real acceleration, adjusted to remove gravity
+        mpu.dmpGetQuaternion(&q, fifoBuffer);
+        mpu.dmpGetAccel(&aa, fifoBuffer);
+        mpu.dmpGetGravity(&gravity, &q);
+        mpu.dmpGetLinearAccel(&aaReal, &aa, &gravity);
+        Serial.print("areal\t");
+        Serial.print(aaReal.x);
+        Serial.print("\t");
+        Serial.print(aaReal.y);
+        Serial.print("\t");
+        Serial.println(aaReal.z);
+    #endif
+
+    #ifdef OUTPUT_READABLE_WORLDACCEL
+        // display initial world-frame acceleration, adjusted to remove gravity
+        // and rotated based on known orientation from quaternion
+        mpu.dmpGetQuaternion(&q, fifoBuffer);
+        mpu.dmpGetAccel(&aa, fifoBuffer);
+        mpu.dmpGetGravity(&gravity, &q);
+        mpu.dmpGetLinearAccel(&aaReal, &aa, &gravity);
+        mpu.dmpGetLinearAccelInWorld(&aaWorld, &aaReal, &q);
+        Serial.print("aworld\t");
+        Serial.print(aaWorld.x);
+        Serial.print("\t");
+        Serial.print(aaWorld.y);
+        Serial.print("\t");
+        Serial.println(aaWorld.z);
+    #endif
+}
+
+void activateLEDBlinker() {
+  // blink LED to indicate activity
+  blinkState = !blinkState;
+  digitalWrite(LED_PIN, blinkState);
 }
